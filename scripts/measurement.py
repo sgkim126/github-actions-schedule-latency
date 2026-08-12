@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 import math
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,6 +16,13 @@ from typing import Iterable, Mapping, Sequence
 
 UTC = timezone.utc
 SCHEDULE_INTERVAL_MINUTES = 5
+RECENT_WINDOWS = [
+    ("recent_1d", timedelta(days=1)),
+    ("recent_3d", timedelta(days=3)),
+    ("recent_7d", timedelta(days=7)),
+    ("recent_15d", timedelta(days=15)),
+    ("recent_30d", timedelta(days=30)),
+]
 RAW_FIELDS = [
     "scheduled_at_utc",
     "observed_at_utc",
@@ -147,30 +154,42 @@ def latency_statistics(values: Sequence[float]) -> dict[str, str | int]:
 
 
 def expected_by_slot(start_at: datetime, finalized_through: datetime) -> dict[str, int]:
-    cutoff = max(finalized_through, start_at)
     counts: dict[str, int] = defaultdict(int)
-    current = start_at
     step = timedelta(minutes=SCHEDULE_INTERVAL_MINUTES)
-    while current < cutoff:
-        counts[current.strftime("%H%M")] += 1
-        current += step
+    first = start_at.replace(second=0, microsecond=0)
+    minute_remainder = first.minute % SCHEDULE_INTERVAL_MINUTES
+    if minute_remainder:
+        first += timedelta(minutes=SCHEDULE_INTERVAL_MINUTES - minute_remainder)
+    if first < start_at:
+        first += step
+    if first >= finalized_through:
+        return counts
+
+    occurrence_count = math.ceil((finalized_through - first) / step)
+    slot_count = 24 * 60 // SCHEDULE_INTERVAL_MINUTES
+    full_days, remaining = divmod(occurrence_count, slot_count)
+    first_slot = (first.hour * 60 + first.minute) // SCHEDULE_INTERVAL_MINUTES
+    for offset in range(slot_count):
+        count = full_days + (1 if offset < remaining else 0)
+        if count:
+            slot = (first_slot + offset) % slot_count
+            hour, minute_index = divmod(slot, 60 // SCHEDULE_INTERVAL_MINUTES)
+            counts[f"{hour:02d}{minute_index * SCHEDULE_INTERVAL_MINUTES:02d}"] = count
     return counts
 
 
-def summary_row(
+def expected_count(start_at: datetime, end_at: datetime) -> int:
+    return sum(expected_by_slot(start_at, end_at).values())
+
+
+def summary_row_from_latencies(
     slot: str,
-    observations: Sequence[Mapping[str, str]],
-    finalized_observations: Sequence[Mapping[str, str]],
+    latencies: Sequence[float],
+    finalized_observed: int,
     finalized_expected: int,
     finalized_through: datetime,
 ) -> dict[str, str | int]:
-    stats = latency_statistics(
-        [
-            (parse_timestamp(row["observed_at_utc"]) - parse_timestamp(row["scheduled_at_utc"])).total_seconds()
-            for row in observations
-        ]
-    )
-    finalized_observed = len(finalized_observations)
+    stats = latency_statistics(latencies)
     missing = max(0, finalized_expected - finalized_observed)
     return {
         "slot_utc": slot,
@@ -190,17 +209,23 @@ def rebuild_summaries(
 ) -> None:
     finalized_through = now - timedelta(days=1)
     observations = deduplicate_observations(observations)
-    start_at = parse_timestamp(observations[0]["scheduled_at_utc"])
+    scheduled_times = [parse_timestamp(row["scheduled_at_utc"]) for row in observations]
+    latencies = [
+        (parse_timestamp(row["observed_at_utc"]) - scheduled_at).total_seconds()
+        for row, scheduled_at in zip(observations, scheduled_times)
+    ]
+    start_at = scheduled_times[0]
     finalized_through = max(finalized_through, start_at)
     expected = expected_by_slot(start_at, finalized_through)
-    finalized = [row for row in observations if parse_timestamp(row["scheduled_at_utc"]) < finalized_through]
+    finalized_end = bisect_left(scheduled_times, finalized_through)
 
-    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
-    grouped_finalized: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for row in observations:
-        grouped[parse_timestamp(row["scheduled_at_utc"]).strftime("%H%M")].append(row)
-    for row in finalized:
-        grouped_finalized[parse_timestamp(row["scheduled_at_utc"]).strftime("%H%M")].append(row)
+    grouped_latencies: dict[str, list[float]] = defaultdict(list)
+    grouped_finalized_counts: dict[str, int] = defaultdict(int)
+    for index, (scheduled_at, latency) in enumerate(zip(scheduled_times, latencies)):
+        slot = scheduled_at.strftime("%H%M")
+        grouped_latencies[slot].append(latency)
+        if index < finalized_end:
+            grouped_finalized_counts[slot] += 1
 
     slots = [
         f"{hour:02d}{minute:02d}"
@@ -208,14 +233,33 @@ def rebuild_summaries(
         for minute in range(0, 60, SCHEDULE_INTERVAL_MINUTES)
     ]
     rows = [
-        summary_row(slot, grouped[slot], grouped_finalized[slot], expected[slot], finalized_through)
+        summary_row_from_latencies(
+            slot,
+            grouped_latencies[slot],
+            grouped_finalized_counts[slot],
+            expected[slot],
+            finalized_through,
+        )
         for slot in slots
     ]
+    for label, window in RECENT_WINDOWS:
+        window_start = max(start_at, finalized_through - window)
+        window_start_index = bisect_left(scheduled_times, window_start, 0, finalized_end)
+        window_latencies = latencies[window_start_index:finalized_end]
+        rows.append(
+            summary_row_from_latencies(
+                label,
+                window_latencies,
+                len(window_latencies),
+                expected_count(window_start, finalized_through),
+                finalized_through,
+            )
+        )
     rows.append(
-        summary_row(
+        summary_row_from_latencies(
             "overall",
-            observations,
-            finalized,
+            latencies,
+            finalized_end,
             sum(expected.values()),
             finalized_through,
         )
