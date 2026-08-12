@@ -212,7 +212,7 @@ def rebuild_summaries(
     scheduled_times = [parse_timestamp(row["scheduled_at_utc"]) for row in observations]
     latencies = [
         (parse_timestamp(row["observed_at_utc"]) - scheduled_at).total_seconds()
-        for row, scheduled_at in zip(observations, scheduled_times)
+        for row, scheduled_at in zip(observations, scheduled_times, strict=True)
     ]
     start_at = scheduled_times[0]
     finalized_through = max(finalized_through, start_at)
@@ -221,7 +221,7 @@ def rebuild_summaries(
 
     grouped_latencies: dict[str, list[float]] = defaultdict(list)
     grouped_finalized_counts: dict[str, int] = defaultdict(int)
-    for index, (scheduled_at, latency) in enumerate(zip(scheduled_times, latencies)):
+    for index, (scheduled_at, latency) in enumerate(zip(scheduled_times, latencies, strict=True)):
         slot = scheduled_at.strftime("%H%M")
         grouped_latencies[slot].append(latency)
         if index < finalized_end:
