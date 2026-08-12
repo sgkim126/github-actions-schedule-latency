@@ -35,7 +35,7 @@ If the remote `measurements` branch advances, the workflow rebuilds its commit f
 Aggregated statistics are stored in `data/summary.csv` on the `main` branch.
 The aggregation workflow runs daily at `01:26 UTC` and can also be run manually.
 
-The file contains one row for each of the 288 five-minute schedule slots, followed by an `overall` row across all observations. Each row includes:
+The file contains one row for each of the 288 five-minute schedule slots, followed by `recent_1d`, `recent_3d`, `recent_7d`, `recent_15d`, `recent_30d`, and `overall` rows. Each row includes:
 
 - Count and mean latency
 - Nearest-rank p50, p95, and p99 latency
@@ -45,6 +45,8 @@ The file contains one row for each of the 288 five-minute schedule slots, follow
 - Finalized expected and observed counts
 - Missing count and missing percentage
 - The time through which missing data has been finalized
+
+Recent-period statistics exclude the most recent 24 hours to allow delayed runs to arrive.
 
 ### Missing observations
 
