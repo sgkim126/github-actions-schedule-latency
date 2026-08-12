@@ -1,0 +1,88 @@
+name: Aggregate schedule latency
+
+on:
+  schedule:
+    - cron: "26 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aggregate
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Check out observations
+        uses: actions/checkout@v7
+        with:
+          ref: measurements
+          path: raw-measurements
+          sparse-checkout: observations
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Build and persist statistics
+        run: |
+          set -euo pipefail
+
+          now="$(date -u +'%Y-%m-%dT%H:%M:%S+00:00')"
+          branch="main"
+          remote_ref="refs/remotes/origin/$branch"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --no-tags origin "refs/heads/$branch:$remote_ref"
+
+          attempt=0
+          while true; do
+            attempt=$((attempt + 1))
+            git checkout -B statistics-write "$remote_ref"
+            python3 scripts/measurement.py \
+              --observations raw-measurements/observations \
+              --now "$now"
+
+            if [[ -z "$(git status --porcelain -- data/summary.csv)" ]]; then
+              printf 'Statistics are already up to date.\n'
+              exit 0
+            fi
+
+            git add -- data/summary.csv
+            git commit -m "measurement: aggregate $now"
+
+            push_status=0
+            git push origin "HEAD:refs/heads/$branch" || push_status=$?
+            if (( push_status == 0 )); then
+              exit 0
+            fi
+
+            if (( attempt >= 5 )); then
+              printf 'Push failed after %s attempts.\n' "$attempt"
+              exit "$push_status"
+            fi
+
+            git fetch --no-tags origin "refs/heads/$branch:$remote_ref"
+            if [[ -z "$(git rev-list --max-count=1 "HEAD..$remote_ref")" ]]; then
+              printf 'Push failed with status %s, but the remote branch did not advance.\n' "$push_status"
+              exit "$push_status"
+            fi
+
+            printf 'Remote branch advanced; rebuilding statistics after 1s.\n'
+            sleep 1
+          done
