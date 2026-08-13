@@ -31,14 +31,14 @@ RAW_FIELDS = [
 SUMMARY_FIELDS = [
     "slot_utc",
     "count",
-    "mean_seconds",
+    "min_seconds",
+    "p25_seconds",
     "p50_seconds",
+    "p75_seconds",
     "p95_seconds",
     "p99_seconds",
-    "min_seconds",
     "max_seconds",
     "within_1m_percent",
-    "within_5m_percent",
     "within_15m_percent",
     "within_30m_percent",
     "within_1h_percent",
@@ -116,14 +116,14 @@ def latency_statistics(values: Sequence[float]) -> dict[str, str | int]:
     if not values:
         return {
             "count": 0,
-            "mean_seconds": "",
+            "min_seconds": "",
+            "p25_seconds": "",
             "p50_seconds": "",
+            "p75_seconds": "",
             "p95_seconds": "",
             "p99_seconds": "",
-            "min_seconds": "",
             "max_seconds": "",
             "within_1m_percent": "",
-            "within_5m_percent": "",
             "within_15m_percent": "",
             "within_30m_percent": "",
             "within_1h_percent": "",
@@ -134,18 +134,18 @@ def latency_statistics(values: Sequence[float]) -> dict[str, str | int]:
     count = len(sorted_values)
     within = {
         threshold: bisect_right(sorted_values, threshold)
-        for threshold in (60, 300, 900, 1800, 3600)
+        for threshold in (60, 900, 1800, 3600)
     }
     return {
         "count": count,
-        "mean_seconds": f"{sum(sorted_values) / count:.2f}",
+        "min_seconds": str(int(sorted_values[0])),
+        "p25_seconds": str(int(nearest_rank(sorted_values, 0.25))),
         "p50_seconds": str(int(nearest_rank(sorted_values, 0.50))),
+        "p75_seconds": str(int(nearest_rank(sorted_values, 0.75))),
         "p95_seconds": str(int(nearest_rank(sorted_values, 0.95))),
         "p99_seconds": str(int(nearest_rank(sorted_values, 0.99))),
-        "min_seconds": str(int(sorted_values[0])),
         "max_seconds": str(int(sorted_values[-1])),
         "within_1m_percent": formatted_percent(within[60], count),
-        "within_5m_percent": formatted_percent(within[300], count),
         "within_15m_percent": formatted_percent(within[900], count),
         "within_30m_percent": formatted_percent(within[1800], count),
         "within_1h_percent": formatted_percent(within[3600], count),
