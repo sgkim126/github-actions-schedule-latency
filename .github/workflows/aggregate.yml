@@ -48,11 +48,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git fetch --no-tags origin "refs/heads/$branch:$remote_ref"
-
           attempt=0
+          max_attempts=5
           while true; do
             attempt=$((attempt + 1))
+
+            fetch_status=0
+            git fetch --no-tags origin "+refs/heads/$branch:$remote_ref" || fetch_status=$?
+            if (( fetch_status != 0 )); then
+              if (( attempt >= max_attempts )); then
+                printf 'Fetch failed after %s attempts with status %s.\n' "$attempt" "$fetch_status"
+                exit "$fetch_status"
+              fi
+
+              sleep_seconds=$((attempt < 10 ? attempt : 10))
+              printf 'Fetch failed with status %s; retrying attempt %s after %ss.\n' \
+                "$fetch_status" "$((attempt + 1))" "$sleep_seconds"
+              sleep "$sleep_seconds"
+              continue
+            fi
+
             git checkout -B statistics-write "$remote_ref"
             python3 scripts/measurement.py \
               --observations raw-measurements/observations \
@@ -72,17 +87,13 @@ jobs:
               exit 0
             fi
 
-            if (( attempt >= 5 )); then
-              printf 'Push failed after %s attempts.\n' "$attempt"
+            if (( attempt >= max_attempts )); then
+              printf 'Push failed after %s attempts with status %s.\n' "$attempt" "$push_status"
               exit "$push_status"
             fi
 
-            git fetch --no-tags origin "refs/heads/$branch:$remote_ref"
-            if [[ -z "$(git rev-list --max-count=1 "HEAD..$remote_ref")" ]]; then
-              printf 'Push failed with status %s, but the remote branch did not advance.\n' "$push_status"
-              exit "$push_status"
-            fi
-
-            printf 'Remote branch advanced; rebuilding statistics after 1s.\n'
-            sleep 1
+            sleep_seconds=$((attempt < 10 ? attempt : 10))
+            printf 'Push failed with status %s; rebuilding and retrying attempt %s after %ss.\n' \
+              "$push_status" "$((attempt + 1))" "$sleep_seconds"
+            sleep "$sleep_seconds"
           done
