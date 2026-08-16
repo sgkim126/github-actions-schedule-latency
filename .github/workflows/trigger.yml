@@ -369,6 +369,7 @@ jobs:
           path="observations/$cron_file"
           attempt=0
           max_attempts=5
+          last_pushed_commit=""
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -391,6 +392,11 @@ jobs:
               continue
             fi
 
+            if [[ -n "$last_pushed_commit" && "$(git rev-parse "$remote_ref")" == "$last_pushed_commit" ]]; then
+              printf 'The previous push was reflected on the remote despite its failure status.\n'
+              exit 0
+            fi
+
             git checkout -B observation-write "$remote_ref"
             mkdir -p observations
             if [[ -f "$path" ]] && grep -Fqx -- "$observation" "$path"; then
@@ -401,11 +407,21 @@ jobs:
             printf '%s\n' "$observation" >> "$path"
             git add -- "$path"
             git commit -m "measurement: record $scheduled_at"
+            last_pushed_commit="$(git rev-parse HEAD)"
 
             push_status=0
             git push origin "HEAD:refs/heads/$branch" || push_status=$?
             if (( push_status == 0 )); then
               exit 0
+            fi
+
+            if git fetch --depth=1 --no-tags origin "+refs/heads/$branch:$remote_ref"; then
+              if [[ "$(git rev-parse "$remote_ref")" == "$last_pushed_commit" ]]; then
+                printf 'The push was reflected on the remote despite its failure status.\n'
+                exit 0
+              fi
+            else
+              printf 'Could not verify whether the failed push was reflected on the remote.\n'
             fi
 
             if (( attempt >= max_attempts )); then
