@@ -406,7 +406,7 @@ jobs:
 
             printf '%s\n' "$observation" >> "$path"
             git add -- "$path"
-            git commit -m "measurement: record $scheduled_at"
+            git commit -m "trigger: $scheduled_at"
             last_pushed_commit="$(git rev-parse HEAD)"
 
             push_status=0

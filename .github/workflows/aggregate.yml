@@ -85,7 +85,7 @@ jobs:
             fi
 
             git add -- data/summary.csv
-            git commit -m "measurement: aggregate $now"
+            git commit -m "aggregate: $now"
             last_pushed_commit="$(git rev-parse HEAD)"
 
             push_status=0
