@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import math
+import sys
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -47,7 +48,6 @@ SUMMARY_FIELDS = [
     "finalized_observed_count",
     "missing_count",
     "missing_percent",
-    "finalized_through_utc",
 ]
 
 
@@ -187,7 +187,6 @@ def summary_row_from_latencies(
     latencies: Sequence[float],
     finalized_observed: int,
     finalized_expected: int,
-    finalized_through: datetime,
 ) -> dict[str, str | int]:
     stats = latency_statistics(latencies)
     missing = max(0, finalized_expected - finalized_observed)
@@ -198,7 +197,6 @@ def summary_row_from_latencies(
         "finalized_observed_count": finalized_observed,
         "missing_count": missing,
         "missing_percent": formatted_percent(missing, finalized_expected),
-        "finalized_through_utc": finalized_through.astimezone(UTC).isoformat(timespec="milliseconds"),
     }
 
 
@@ -206,7 +204,7 @@ def rebuild_summaries(
     root: Path,
     now: datetime,
     observations: Iterable[Mapping[str, object]],
-) -> None:
+) -> datetime:
     finalized_through = now - timedelta(days=1)
     observations = deduplicate_observations(observations)
     scheduled_times = [parse_timestamp(row["scheduled_at_utc"]) for row in observations]
@@ -238,7 +236,6 @@ def rebuild_summaries(
             grouped_latencies[slot],
             grouped_finalized_counts[slot],
             expected[slot],
-            finalized_through,
         )
         for slot in slots
     ]
@@ -252,7 +249,6 @@ def rebuild_summaries(
                 window_latencies,
                 len(window_latencies),
                 expected_count(window_start, finalized_through),
-                finalized_through,
             )
         )
     rows.append(
@@ -261,10 +257,10 @@ def rebuild_summaries(
             latencies,
             finalized_end,
             sum(expected.values()),
-            finalized_through,
         )
     )
     write_csv(root / "data" / "summary.csv", SUMMARY_FIELDS, rows)
+    return finalized_through
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -278,12 +274,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     observations = load_observations(args.observations)
-    rebuild_summaries(
+    finalized_through = rebuild_summaries(
         args.root.resolve(),
         parse_timestamp(args.now),
         observations,
     )
-    print(f"observations={len(observations)}")
+    print(f"observations={len(observations)}", file=sys.stderr)
+    print(finalized_through.astimezone(UTC).isoformat(timespec="milliseconds"))
     return 0
 
 

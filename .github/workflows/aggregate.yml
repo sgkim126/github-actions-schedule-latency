@@ -75,9 +75,9 @@ jobs:
             fi
 
             git checkout -B statistics-write "$remote_ref"
-            python3 scripts/measurement.py \
+            finalized_through="$(python3 scripts/measurement.py \
               --observations raw-measurements/observations \
-              --now "$now"
+              --now "$now")"
 
             if [[ -z "$(git status --porcelain -- data/summary.csv)" ]]; then
               printf 'Statistics are already up to date.\n'
@@ -85,7 +85,7 @@ jobs:
             fi
 
             git add -- data/summary.csv
-            git commit -m "aggregate: $now"
+            git commit -m "finalized through $finalized_through"
             last_pushed_commit="$(git rev-parse HEAD)"
 
             push_status=0

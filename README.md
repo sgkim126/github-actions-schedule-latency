@@ -44,7 +44,8 @@ The file contains one row for each of the 288 five-minute schedule slots, follow
 - Percentage over 1 hour
 - Finalized expected and observed counts
 - Missing count and missing percentage
-- The time through which missing data has been finalized
+
+The aggregation commit message records the UTC time through which missing data has been finalized.
 
 Recent-period statistics exclude the most recent 24 hours to allow delayed runs to arrive.
 
